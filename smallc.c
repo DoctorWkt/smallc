@@ -1,4 +1,3 @@
-
 /************************************************/
 /*						*/
 /*		small-c compiler		*/
@@ -18,29 +17,10 @@
 #define LINE    "<><><><><><><><><><><><><><>X<><><><><><><><><><><><><><>"
 
 
-#asm
-	DB	'SMALL-C COMPILER V.1.2 DOS--CP/M CROSS COMPILER',0
-#endasm
-
-
 /*	Define system dependent parameters	*/
 
-/*	Stand-alone definitions			*/
-
-/* INCLUDE THE LIBRARY TO COMPILE THE COMPILER (RDK) */
-
-/* #include smallc.lib */ /* small-c library included in source now */
-
-/* IN DOS USE THE SMALL-C OBJ LIBRARY RATHER THAN IN-LINE ASSEMBLER */
-
 #define NULL 0
-#define eol 10 /* was 13 */
-
-/*	UNIX definitions (if not stand-alone)	*/
-
-/* #include "stdio.h"  /* was <stdio.h> */
-
-/* #define eol 10	*/
+#define eol 10
 
 /*	Define the symbol table parameters	*/
 
@@ -236,7 +216,7 @@ zabort()
 	closeout();
 	toconsole();
 	pl("Compilation aborted.");  nl();
-	exit();
+	exit(1);
 /* end zabort */}
 
 /*					*/
@@ -825,7 +805,7 @@ doasm()
 	{
 	cmode=0;		/* mark mode as "asm" */
 	while (1)
-		{inline();	/* get and print lines */
+		{readline();	/* get and print lines */
 		if (match("#endasm")) break;	/* until... */
 		if(eof)break;
 		outstr(line);
@@ -1035,18 +1015,18 @@ inbyte()
 {
 	while(ch()==0)
 		{if (eof) return 0;
-		inline();
+		readline();
 		preprocess();
 		}
 	return gch();
 }
 inchar()
 {
-	if(ch()==0)inline();
+	if(ch()==0)readline();
 	if(eof)return 0;
 	return(gch());
 }
-inline()
+readline()
 {
 	int k,unit;
 	while(1)
@@ -1126,7 +1106,7 @@ preprocess()
 			{inchar();inchar();
 			while(((ch()=='*')&
 				(nch()=='/'))==0)
-				{if(ch()==0)inline();
+				{if(ch()==0)readline();
 					else inchar();
 				if(eof)break;
 				}
@@ -1371,7 +1351,7 @@ amatch(lit,len)
 blanks()
 	{while(1)
 		{while(ch()==0)
-			{inline();
+			{readline();
 			preprocess();
 			if(eof)break;
 			}
