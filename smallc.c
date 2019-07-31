@@ -137,12 +137,10 @@ int	nxtlab,		/* next avail label # */
 	input,		/* iob # for input file */
 	output,		/* iob # for output file (if any) */
 	input2,		/* iob # for "include" file */
-	glbflag,	/* non-zero if internal globals */
 	ctext,		/* non-zero to intermix c-source */
 	cmode,		/* non-zero while parsing c-code */
 			/* zero when passing assembly code */
 	lastst,		/* last executed statement type */
-	mainflg,	/* output is to be first asm file	gtf 4/9/80 */
 	saveout,	/* holds output ptr when diverted to console	   */
 			/*					gtf 7/16/80 */
 	fnstart,	/* line# of start of current fn.	gtf 7/2/80 */
@@ -156,8 +154,6 @@ char   *currfn,		/* ptr to symtab entry for current fn.	gtf 7/17/80 */
        *savecurr;	/* copy of currfn for #include		gtf 7/17/80 */
 char	quote[2];	/* literal string for '"' */
 char	*cptr;		/* work ptr to any char buffer */
-int	*iptr;		/* work ptr to any int buffer */
-/*	>>>>> start cc1 <<<<<<		*/
 
 /*					*/
 /*	Compiler begins execution here	*/
@@ -179,7 +175,6 @@ main()
 	saveout=	/* no diverted output */
 	ncmp=		/* no open compound states */
 	lastst=		/* no last statement yet */
-	mainflg=	/* not first file to asm 		gtf 4/9/80 */
 	fnstart=	/* current "function" started at line 0 gtf 7/2/80 */
 	lineno=		/* no lines read from file		gtf 7/2/80 */
 	infunc=		/* not in function now			gtf 7/2/80 */
@@ -192,8 +187,8 @@ main()
 	/*	compiler body		*/
 	/*				*/
 	ask();			/* get user options */
-	openout();		/* get an output file */
 	openin();		/* and initial input file */
+	openout();		/* get an output file */
 	header();		/* intro code */
 	parse(); 		/* process ALL input */
 	dumplits();		/* then dump literal pool */
@@ -250,7 +245,7 @@ dumplits()
 		{defbyte();	/* pseudo-op to define byte */
 		j=10;		/* max bytes per line */
 		while(j--)
-			{outdec((litq[k++]&127));
+			{outdec(litq[k++]);
 			if ((j==0) | (k>=litptr))
 				{nl();		/* need <cr> */
 				break;
@@ -265,7 +260,6 @@ dumplits()
 dumpglbs()
 	{
 	int j;
-	if(glbflag==0)return;	/* don't if user said no */
 	cptr=startglb;
 	while(cptr<glbptr)
 		{if(cptr[ident]!=function)
@@ -273,8 +267,7 @@ dumpglbs()
 			{outname(cptr);col();
 				/* output name as label... */
 			defstorage();	/* define storage */
-			j=((cptr[offset]&255)+
-				((cptr[offset+1]&255)<<8));
+			j=(cptr[offset]&255)+(cptr[offset+1]<<8);
 					/* calc # bytes */
 			if((cptr[type]==cint)|
 				(cptr[ident]==pointer))
@@ -321,43 +314,6 @@ ask()
 	ctext=0;		/* assume no */
 	if((ch()=='Y')|(ch()=='y'))
 		ctext=1;	/* user said yes */
-	/* see if the user is compiling everything at once */
-	/*	(as is usually the case) - gtf 4/9/80 */
-	pl("Are you compiling the whole program at once (Y,n) ? ");
-	gets(line);
-	if((ch()!='N')&(ch()!='n')){	/* single file - assume... */
-		glbflag=1;	/* define globals */
-		mainflg=1;	/* first file to assembler */
-		nxtlab =0;	/* start numbers at lowest possible */
-		}
-	else {		/* one of many - ask everything */
-	 	/* see if user wants us to allocate static */
-	 	/*  variables by name in this module	*/
-	 	/*	(pseudo external capability)	*/
-	 	pl("Do you want the globals to be defined (y,N) ? ");
-	 	gets(line);
-	 	glbflag=0;
-	 	if((ch()=='Y')|(ch()=='y'))
-	 		glbflag=1;	/* user said yes */
-	 	/* see if we should put out the stuff	*/
-	 	/*	needed for the first assembler	*/
-	 	/*	file. - gtf 4/9/80		*/
-		pl(
-	"Is the output file the first one the assembler will see (y,N) ? ");
-	 	gets(line);
-	 	mainflg=0;
-	 	if((ch()=='Y')|(ch()=='y'))
-	 		mainflg=1;	/* indeed it is */
-	 	/* get first allowable number for compiler-generated */
-	 	/*	labels (in case user will append modules) */
-	 	while(1){
-	 		pl("Starting number for labels (0) ? ");
-	 		gets(line);
-	 		if(ch()==0){num[0]=0;break;}
-	 		if(k=number(num))break;
-	 		}
-	 	nxtlab=num[0];
-		}
 	/* see if user wants to be sure to see all errors */
 	pl("Should I pause after an error (y,N) ? ");
 	gets(line);
@@ -372,16 +328,15 @@ ask()
 /*	Get output filename		*/
 /*					*/
 openout()
-	{
-	kill();			/* erase line */
-	output=0;		/* start with none */
-	pl("Output filename? "); /* ask...*/
-	gets(line);	/* get a filename */
-	if(ch()==0)return;	/* none given... */
-	if((output=fopen(line,"w"))==NULL) /* if given, open */
-		{output=0;	/* can't open */
-		error("Open failure!");
+{
+	output=0;
+	while(output==0) {
+    	pl("Output filename? ");
+    	gets(line);
+    	if((output=fopen(line,"w"))==NULL) {
+    		pl("Open failure!");
 		}
+	}
 	kill();			/* erase line */
 }
 /*					*/
@@ -389,22 +344,15 @@ openout()
 /*					*/
 openin()
 {
-	input=0;		/* none to start with */
-	while(input==0){	/* any above 1 allowed */
-		kill();		/* clear line */
-		if(eof)break;	/* if user said none */
+	input=0;
+	while(input==0) {
 		pl("Input filename? ");
-		gets(line);	/* get a name */
-		if(ch()==0)
-			{eof=1;break;} /* none given... */
-		if((input=fopen(line,"r"))!=NULL)
-			newfile();			/* gtf 7/16/80 */
-		else {	input=0;	/* can't open it */
+		gets(line);
+		if ((input=fopen(line,"r"))==NULL) {
 			pl("Open failure");
-			}
 		}
-	kill();		/* erase line */
 	}
+}
 
 /*					*/
 /*	Reset line count, etc.		*/
@@ -953,22 +901,23 @@ printlabel(label)
 }
 /* Test if given character is alpha */
 alpha(c)
-	char c;
-{	c=c&127;
-	return(((c>='a')&(c<='z'))|
+	int c;
+{
+	return ((c>='a')&(c<='z'))|
 		((c>='A')&(c<='Z'))|
-		(c=='_'));
+		(c=='_');
 }
 /* Test if given character is numeric */
 numeric(c)
-	char c;
-{	c=c&127;
-	return((c>='0')&(c<='9'));
+	int c;
+{
+	return (c>='0')&(c<='9');
 }
 /* Test if given character is alphanumeric */
 an(c)
-	char c;
-{	return((alpha(c))|(numeric(c)));
+	int c;
+{
+    return alpha(c)|numeric(c);
 }
 /* Print a carriage return and a string only to console */
 pl(str)
@@ -997,15 +946,15 @@ readwhile()
 	else return (wqptr-wqsiz);
  }
 ch()
-{	return(line[lptr]&127);
+{	return line[lptr];
 }
 nch()
 {	if(ch()==0)return 0;
-		else return(line[lptr+1]&127);
+		else return line[lptr+1];
 }
 gch()
 {	if(ch()==0)return 0;
-		else return(line[lptr++]&127);
+		else return line[lptr++];
 }
 kill()
 {	lptr=0;
@@ -1030,8 +979,10 @@ readline()
 {
 	int k,unit;
 	while(1)
-		{if (input==0)openin();
-		if(eof)return;
+		{if (input==0) {
+		    eof=1;
+		    return;
+		}
 		if((unit=input2)==0)unit=input;
 		kill();
 		while((k=getc(unit))>0)
@@ -1936,7 +1887,7 @@ pstr(val)
 	k=0;
 	if (match("'")==0) return 0;
 	while((c=gch())!=39)
-		k=(k&255)*256 + (c&127);
+		k=(k<<8)+c;
 	val[0]=k;
 	return 1;
 }
@@ -1968,7 +1919,8 @@ comment()
 
 /* Put out assembler info before any code is generated */
 header()
-{	comment();
+{
+    comment();
 	outstr(BANNER);
 	nl();
 	comment();
@@ -1979,24 +1931,12 @@ header()
 	nl();
 	comment();
 	nl();
-	if(mainflg){		/* do stuff needed for first */
-		ol("ORG 100h"); /* assembler file. */		   
-		ol("LHLD 6");	/* set up stack */
-		ol("SPHL");
-		callrts("ccgo");	/* set default drive for CP/M */
-		zcall("main");	/* call the code generated by small-c */
-		zcall("exit");	/* do an exit		gtf 7/16/80 */
-		}
 }
 /* Print any assembler stuff needed after all code */
 trailer()
-{	/* ol("END"); */	/*...note: commented out! */
-
-	nl();			/* 6 May 80 rj errorsummary() now goes to console */
-	comment();
-	outstr(" --- End of Compilation ---");
-	nl();
+{
 }
+
 /* Print out a name such that it won't annoy the assembler */
 /*	(by matching anything reserved, like opcodes.) */
 /*	gtf 4/7/80 */
@@ -2038,12 +1978,10 @@ getmem(sym)
 getloc(sym)
 	char *sym;
 {	immed();
-	outdec(((sym[offset]&255)+
-		((sym[offset+1]&255)<<8))-
-		Zsp);
+	outdec((sym[offset]&255)+(sym[offset+1]<<8)-Zsp);
 	nl();
 	ol("DAD SP");
-	}
+}
 /* Store the primary register into the specified */
 /*	static memory cell */
 putmem(sym)
