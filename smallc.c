@@ -196,7 +196,7 @@ main()
 	trailer();		/* follow-up code */
 	closeout();		/* close the output (if any) */
 	errorsummary();		/* summarize errors (on console!) */
-	return;			/* then exit to system */
+	return errcnt!=0;
 	}
 
 /*					*/
@@ -258,26 +258,25 @@ dumplits()
 /*	Dump all static variables	*/
 /*					*/
 dumpglbs()
-	{
+{
 	int j;
 	cptr=startglb;
-	while(cptr<glbptr)
-		{if(cptr[ident]!=function)
-			/* do if anything but function */
-			{outname(cptr);col();
-				/* output name as label... */
-			defstorage();	/* define storage */
+	while (cptr<glbptr) {
+		if (cptr[ident]!=function) {
+			defstorage();outname(cptr);outbyte(',');
 			j=(cptr[offset]&255)+(cptr[offset+1]<<8);
 					/* calc # bytes */
-			if((cptr[type]==cint)|
-				(cptr[ident]==pointer))
-				j=j+j;
-			outdec(j);	/* need that many */
-			nl();
+			if ((cptr[type]==cint)|(cptr[ident]==pointer)) {
+    			outdec(j<<2);outstr(",4");
 			}
-		cptr=cptr+symsiz;
+			else {
+    			outdec(j);outstr(",1");
+			}
+			nl();
 		}
+		cptr=cptr+symsiz;
 	}
+}
 /*					*/
 /*	Report errors for user		*/
 /*					*/
@@ -333,7 +332,11 @@ openout()
 	while(output==0) {
     	pl("Output filename? ");
     	gets(line);
+#ifdef SMALLC
+    	if((output=fopen("w",line))==NULL) {
+#else
     	if((output=fopen(line,"w"))==NULL) {
+#endif
     		pl("Open failure!");
 		}
 	}
@@ -348,7 +351,11 @@ openin()
 	while(input==0) {
 		pl("Input filename? ");
 		gets(line);
+#ifdef SMALLC
+		if ((input=fopen("r",line))==NULL) {
+#else
 		if ((input=fopen(line,"r"))==NULL) {
+#endif
 			pl("Open failure");
 		}
 	}
@@ -378,10 +385,14 @@ doinclude()
 
 	if(input2)					/* gtf 7/16/80 */
 		error("Cannot nest include files");
-	else if((input2=fopen(line+lptr,"r"))==NULL)
-		{input2=0;
+#ifdef SMALLC
+	else if ((input2=fopen("r",line+lptr))==NULL) {
+#else
+	else if ((input2=fopen(line+lptr,"r"))==NULL) {
+#endif
+		input2=0;
 		error("Open failure on include file");
-		}
+	}
 	else {	saveline = lineno;
 		savecurr = currfn;
 		saveinfn = infunc;
@@ -474,17 +485,17 @@ declloc(typ)		/* typ is cchar or cint */
 				{k=needsub();
 				if(k)
 					{j=array;
-					if(typ==cint)k=k+k;
+					if(typ==cint)k=k<<2;
 					}
 				else
 					{j=pointer;
-					k=2;
+					k=4;
 					}
 				}
 			else
 				if((typ==cchar)
 					&(j!=pointer))
-					k=1;else k=2;
+					k=1;else k=4;
 			/* change machine stack */
 			Zsp=modstk(Zsp-k);
 			addloc(sname,j,typ,Zsp);
@@ -547,13 +558,15 @@ newfunc()
 	outstr("====== "); outstr(currfn+name); outstr("()"); nl();
 	tofile();
 
+    ot(".global ");outname(n);nl();
+	outname(n);col();nl();	/* print function name */
+
 	/* we had better see open paren for args... */
 	if(match("(")==0)error("missing open paren");
-	outname(n);col();nl();	/* print function name */
 	argstk=0;		/* init arg count */
 	while(match(")")==0)	/* then count args */
 		/* any legal name bumps arg count */
-		{if(symname(n))argstk=argstk+2;
+		{if(symname(n))argstk=argstk+4;
 		else{error("illegal argument name");junk();}
 		blanks();
 		/* if not closing paren, should be comma */
@@ -606,7 +619,7 @@ getarg(t)		/* t = cchar or cint */
 			/* add entry as pointer */
 			}
 		addloc(n,j,t,argstk);
-		argstk=argstk-2;	/* cnt down */
+		argstk=argstk-4;	/* cnt down */
 		if(endst())return;
 		if(match(",")==0)error("expected comma");
 		}
@@ -620,15 +633,7 @@ getarg(t)		/* t = cchar or cint */
 /*  and returns a number telling which one */
 statement()
 {
-        /* NOTE (RDK) --- On DOS there is no CPM function so just try */
-        /* commenting it out for the first test compilation to see if */
-        /* the compiler basic framework works OK in the DOS environment */
-	/* if(cpm(11,0) & 1)	/* check for ctrl-C gtf 7/17/80 */
-		/* if(getchar()==3) */
-			/* zabort(); */
-
-	if ((ch()==0) & (eof)) return;
-	else if(amatch("char",4))
+	if(amatch("char",4))
 		{declloc(cchar);ns();}
 	else if(amatch("int",3))
 		{declloc(cint);ns();}
@@ -781,7 +786,7 @@ callfunction(ptr)
 		expression();	/* get an argument */
 		if(ptr==0)swapstk(); /* don't push addr */
 		zpush();	/* push argument */
-		nargs=nargs+2;	/* count args*2 */
+		nargs=nargs+4;	/* count args*2 */
 		if (match(",")==0) break;
 		}
 	needbrack(")");
@@ -896,8 +901,8 @@ getlabel()
 /* Print specified number as label */
 printlabel(label)
 	int label;
-{	outasm("cc");
-	outdec(label);
+{
+    outstr(".L");outdec(label);
 }
 /* Test if given character is alpha */
 alpha(c)
@@ -1137,35 +1142,32 @@ tofile()
 /* end tofile */}
 
 outbyte(c)
-	char c;
+	int c;
 {
-	if(c==0)return 0;
-	if(output)
-		{if((putc(c,output))<=0)
-			{closeout();
+	if (output) {
+#ifdef SMALLC
+		if ((putc(output,c))<=0) {
+#else
+		if ((putc(c,output))<=0) {
+#endif
+			closeout();
 			error("Output file error");
-			zabort();			/* gtf 7/17/80 */
-			}
+			zabort();
 		}
-	else putchar(c);
+	}
+	else {
+	    putchar(c);
+    }
 	return c;
 }
+
 outstr(ptr)
 	char ptr[];
- {
-	int k;
-	k=0;
-	while(outbyte(ptr[k++]));
- }
-
-/* write text destined for the assembler to read */
-/* (i.e. stuff not in comments)			*/
-/*  gtf  6/26/80 */
-outasm(ptr)
-char *ptr;
 {
-	while(outbyte(raise(*ptr++)));
-/* end outasm */}
+	while (*ptr) {
+	    outbyte(*ptr++);
+    }
+}
 
 nl()
 	{outbyte(eol);}
@@ -1173,28 +1175,6 @@ tab()
 	{outbyte(9);}
 col()
 	{outbyte(58);}
-bell()				/* gtf 7/16/80 */
-	{outbyte(7);}
-/*				replaced 7/2/80 gtf
- * error(ptr)
- *	char ptr[];
- * {
- *	int k;
- *	comment();outstr(line);nl();comment();
- *	k=0;
- *	while(k<lptr)
- *		{if(line[k]==9) tab();
- *			else outbyte(' ');
- *		++k;
- *		}
- *	outbyte('^');
- *	nl();comment();outstr("******  ");
- *	outstr(ptr);
- *	outstr("  ******");
- *	nl();
- *	++errcnt;
- * }
- */
 
 error(ptr)
 char ptr[];
@@ -1202,19 +1182,7 @@ char ptr[];
 	char junk[81];
 
 	toconsole();
-	bell();
-	outstr("Line "); outdec(lineno); outstr(", ");
-	if(infunc==0)
-		outbyte('(');
-	if(currfn==NULL)
-		outstr("start of file");
-	else	outstr(currfn+name);
-	if(infunc==0)
-		outbyte(')');
-	outstr(" + ");
-	outdec(lineno-fnstart);
-	outstr(": ");  outstr(ptr);  nl();
-
+	outstr("Line ");outdec(lineno);outstr(": ");outstr(ptr);nl();
 	outstr(line); nl();
 
 	k=0;	/* skip to error position */
@@ -1236,7 +1204,7 @@ char ptr[];
 			errstop=0;
 		}
 	tofile();
-/* end error */}
+}
 
 ol(ptr)
 	char ptr[];
@@ -1248,7 +1216,7 @@ ot(ptr)
 	char ptr[];
 {
 	tab();
-	outasm(ptr);
+	outstr(ptr);
 }
 streq(str1,str2)
 	char str1[],str2[];
@@ -1641,12 +1609,14 @@ heir10(lval)
 		rvalue(lval);
 		inc();
 		ptr=lval[0];
-		if((ptr[ident]==pointer)&
-			(ptr[type]==cint))
-				inc();
+		if ((ptr[ident]==pointer)&(ptr[type]==cint)) {
+			inc();
+			inc();
+			inc();
+		}
 		store(lval);
 		return 0;
-		}
+	}
 	else if(match("--"))
 		{if((k=heir10(lval))==0)
 			{needlval();
@@ -1656,18 +1626,20 @@ heir10(lval)
 		rvalue(lval);
 		dec();
 		ptr=lval[0];
-		if((ptr[ident]==pointer)&
-			(ptr[type]==cint))
-				dec();
+		if ((ptr[ident]==pointer)&(ptr[type]==cint)) {
+			dec();
+			dec();
+			dec();
+		}
 		store(lval);
 		return 0;
-		}
+	}
 	else if (match("-"))
 		{k=heir10(lval);
 		if (k) rvalue(lval);
 		neg();
 		return 0;
-		}
+	}
 	else if(match("*"))
 		{k=heir10(lval);
 		if(k)rvalue(lval);
@@ -1675,7 +1647,7 @@ heir10(lval)
 		if(ptr=lval[0])lval[1]=ptr[type];
 		lval[0]=0;
 		return 1;
-		}
+	}
 	else if(match("&"))
 		{k=heir10(lval);
 		if(k==0)
@@ -1689,8 +1661,8 @@ heir10(lval)
 			nl();
 			lval[1]=ptr[type];
 			return 0;
-			}
 		}
+	}
 	else 
 		{k=heir11(lval);
 		if(match("++"))
@@ -1702,16 +1674,20 @@ heir10(lval)
 			rvalue(lval);
 			inc();
 			ptr=lval[0];
-			if((ptr[ident]==pointer)&
-				(ptr[type]==cint))
-					inc();
+    		if ((ptr[ident]==pointer)&(ptr[type]==cint)) {
+    			inc();
+    			inc();
+    			inc();
+    		}
 			store(lval);
 			dec();
-			if((ptr[ident]==pointer)&
-				(ptr[type]==cint))
-				dec();
+    		if ((ptr[ident]==pointer)&(ptr[type]==cint)) {
+    			dec();
+    			dec();
+    			dec();
+    		}
 			return 0;
-			}
+		}
 		else if(match("--"))
 			{if(k==0)
 				{needlval();
@@ -1721,19 +1697,23 @@ heir10(lval)
 			rvalue(lval);
 			dec();
 			ptr=lval[0];
-			if((ptr[ident]==pointer)&
-				(ptr[type]==cint))
-					dec();
+    		if ((ptr[ident]==pointer)&(ptr[type]==cint)) {
+    			dec();
+    			dec();
+    			dec();
+    		}
 			store(lval);
 			inc();
-			if((ptr[ident]==pointer)&
-				(ptr[type]==cint))
-				inc();
+    		if ((ptr[ident]==pointer)&(ptr[type]==cint)) {
+    			inc();
+    			inc();
+    			inc();
+    		}
 			return 0;
-			}
-		else return k;
 		}
+		else return k;
 	}
+}
 /*	>>>>>> start of cc7 <<<<<<	*/
 
 heir11(lval)
@@ -1781,12 +1761,10 @@ heir11(lval)
 		else return k;
 		}
 	if(ptr==0)return k;
-	if(ptr[ident]==function)
-		{immed();
-		outname(ptr);
-		nl();
+	if(ptr[ident]==function) {
+		ot("movl $");outname(ptr);outstr(",%eax");nl();
 		return 0;
-		}
+	}
 	return k;
 }
 primary(lval)
@@ -1812,8 +1790,7 @@ primary(lval)
 			{lval[0]=ptr;
 			lval[1]=0;
 			if(ptr[ident]!=array)return 1;
-			immed();
-			outname(ptr);nl();
+			ot("movl $");outname(ptr);outstr(",%eax");nl();
 			lval[1]=ptr[type];
 			return 0;
 			}
@@ -1852,38 +1829,36 @@ test(label)
 }
 constant(val)
 	int val[];
-{	if (number(val))
-		immed();
-	else if (pstr(val))
-		immed();
-	else if (qstr(val))
-		{immed();printlabel(litlab);outbyte('+');}
+{
+    if (number(val)) {
+		ot("movl $");
+	}
+	else if (pstr(val)) {
+		ot("movl $");
+	}
+	else if (qstr(val)) {
+		ot("movl $");printlabel(litlab);outbyte('+');
+	}
 	else return 0;	
-	outdec(val[0]);
-	nl();
+	outdec(val[0]);outstr(",%eax");nl();
 	return 1;
 }
 number(val)
 	int val[];
-{	int k,minus;char c;
-	k=minus=1;
-	while(k)
-		{k=0;
-		if (match("+")) k=1;
-		if (match("-")) {minus=(-minus);k=1;}
-		}
+{
+    int k;
+	k=0;
 	if(numeric(ch())==0)return 0;
-	while (numeric(ch()))
-		{c=inbyte();
-		k=k*10+(c-'0');
-		}
-	if (minus<0) k=(-k);
+	while (numeric(ch())) {
+		k=k*10+gch()-'0';
+	}
 	val[0]=k;
 	return 1;
 }
 pstr(val)
 	int val[];
-{	int k;char c;
+{
+    int c,k;
 	k=0;
 	if (match("'")==0) return 0;
 	while((c=gch())!=39)
@@ -1893,16 +1868,14 @@ pstr(val)
 }
 qstr(val)
 	int val[];
-{	char c;
+{
 	if (match(quote)==0) return 0;
 	val[0]=litptr;
 	while (ch()!='"')
 		{if(ch()==0)break;
 		if(litptr>=litmax)
 			{error("string space exhausted");
-			while(match(quote)==0)
-				if(gch()==0)break;
-			return 1;
+			zabort();
 			}
 		litq[litptr++]=gch();
 		}
@@ -1910,7 +1883,6 @@ qstr(val)
 	litq[litptr++]=0;
 	return 1;
 }
-/*	>>>>>> start of cc8 <<<<<<<	*/
 
 /* Begin a comment line for the assembler */
 comment()
@@ -1920,17 +1892,6 @@ comment()
 /* Put out assembler info before any code is generated */
 header()
 {
-    comment();
-	outstr(BANNER);
-	nl();
-	comment();
-	outstr(VERSION);
-	nl();
-	comment();
-	outstr(AUTHOR);
-	nl();
-	comment();
-	nl();
 }
 /* Print any assembler stuff needed after all code */
 trailer()
@@ -1939,82 +1900,75 @@ trailer()
 
 /* Print out a name such that it won't annoy the assembler */
 /*	(by matching anything reserved, like opcodes.) */
-/*	gtf 4/7/80 */
 outname(sname)
-char *sname;
-{	int len, i,j;
-
-	outasm("qz");
-	len = strlen(sname);
-	if(len>(asmpref+asmsuff)){
-		i = asmpref;
-		len = len-asmpref-asmsuff;
-		while(i-- > 0)
-			outbyte(raise(*sname++));
-		while(len-- > 0)
-			sname++;
-		while(*sname)
-			outbyte(raise(*sname++));
-		}
-	else	outasm(sname);
-/* end outname */}
+    char *sname;
+{
+	outstr(sname);
+}
 /* Fetch a static memory cell into the primary register */
 getmem(sym)
 	char *sym;
-{	if((sym[ident]!=pointer)&(sym[type]==cchar))
-		{ot("LDA ");
-		outname(sym+name);
-		nl();
-		callrts("ccsxt");
-		}
-	else
-		{ot("LHLD ");
-		outname(sym+name);
-		nl();
-		}
-	}
+{
+    if ((sym[ident]!=pointer)&(sym[type]==cchar)) {
+        ot("movsbl ");
+    }
+    else {
+        ot("movl ");
+    }
+	outname(sym+name);outstr(",%eax");nl();
+}
 /* Fetch the address of the specified symbol */
 /*	into the primary register */
 getloc(sym)
 	char *sym;
-{	immed();
+{
+    ot("leal ");
 	outdec((sym[offset]&255)+(sym[offset+1]<<8)-Zsp);
+	outstr("(%esp),%eax");
 	nl();
-	ol("DAD SP");
 }
 /* Store the primary register into the specified */
 /*	static memory cell */
 putmem(sym)
 	char *sym;
-{	if((sym[ident]!=pointer)&(sym[type]==cchar))
-		{ol("MOV A,L");
-		ot("STA ");
-		}
-	else ot("SHLD ");
-	outname(sym+name);
-	nl();
-	}
+{
+    if ((sym[ident]!=pointer)&(sym[type]==cchar)) {
+        ot("movb %al,");
+    }
+    else {
+        ot("movl %eax,");
+    }
+	outname(sym+name);nl();
+}
 /* Store the specified object type in the primary register */
 /*	at the address on the top of the stack */
 putstk(typeobj)
-char typeobj;
-{	zpop();
-	if(typeobj==cint)
-		callrts("ccpint");
-	else {	ol("MOV A,L");		/* per Ron Cain: gtf 9/25/80 */
-		ol("STAX D");
-		}
-	}
+    int typeobj;
+{
+    zpop();
+    if (typeobj==cchar) {
+        ol("movb %al,(%ecx)");
+    }
+    else {
+        ol("movl %eax,(%ecx)");
+    }
+}
 /* Fetch the specified object type indirect through the */
 /*	primary register into the primary register */
 indirect(typeobj)
-	char typeobj;
-{	if(typeobj==cchar)callrts("ccgchar");
-		else callrts("ccgint");
+	int typeobj;
+{
+    if (typeobj==cchar) {
+        ol("movsbl (%eax),%eax");
+    }
+    else {
+        ol("movl (%eax),%eax");
+    }
 }
 /* Swap the primary and secondary registers */
 swap()
-{	ol("XCHG");
+{
+    ol("xchgl %ecx,%eax");
 }
 /* Print partial instruction to get an immediate value */
 /*	into the primary register */
@@ -2023,13 +1977,15 @@ immed()
 }
 /* Push the primary register onto the stack */
 zpush()
-{	ol("PUSH H");
-	Zsp=Zsp-2;
+{
+    ol("pushl %eax");
+	Zsp=Zsp-4;
 }
 /* Pop the top of the stack into the secondary register */
 zpop()
-{	ol("POP D");
-	Zsp=Zsp+2;
+{
+    ol("popl %ecx");
+	Zsp=Zsp+4;
 }
 /* Swap the primary register and the top of the stack */
 swapstk()
@@ -2038,27 +1994,18 @@ swapstk()
 /* Call the specified subroutine name */
 zcall(sname)
 	char *sname;
-{	ot("CALL ");
-	outname(sname);
-	nl();
-}
-/* Call a run-time library routine */
-callrts(sname)
-char *sname;
 {
-	ot("CALL ");
-	outasm(sname);
-	nl();
-/*end callrts*/}
-
+    ot("call ");outname(sname);nl();
+}
 /* Return from subroutine */
 zret()
-{	ol("RET");
+{
+    ol("ret");
 }
 /* Perform subroutine call to value on top of stack */
 callstk()
 {	immed();
-	outasm("$+5");
+	outstr("$+5");
 	nl();
 	swapstk();
 	ol("PCHL");
@@ -2067,133 +2014,126 @@ callstk()
 /* Jump to specified internal label number */
 jump(label)
 	int label;
-{	ot("JMP ");
-	printlabel(label);
-	nl();
-	}
+{
+    ot("jmp ");printlabel(label);nl();
+}
 /* Test the primary register and jump if false to label */
 testjump(label)
 	int label;
-{	ol("MOV A,H");
-	ol("ORA L");
-	ot("JZ ");
-	printlabel(label);
-	nl();
-	}
+{
+    ol("testl %eax,%eax");
+	ot("jz ");printlabel(label);nl();
+}
 /* Print pseudo-op to define a byte */
 defbyte()
-{	ot("DB ");
+{	ot(".byte ");
 }
 /*Print pseudo-op to define storage */
 defstorage()
-{	ot("DS ");
+{	ot(".comm ");
 }
 /* Print pseudo-op to define a word */
 defword()
-{	ot("DW ");
+{	ot(".word ");
 }
 /* Modify the stack pointer to the new value indicated */
 modstk(newsp)
 	int newsp;
- {	int k;
+{
+    int k;
 	k=newsp-Zsp;
-	if(k==0)return newsp;
-	if(k>=0)
-		{if(k<7)
-			{if(k&1)
-				{ol("INX SP");
-				k--;
-				}
-			while(k)
-				{ol("POP B");
-				k=k-2;
-				}
-			return newsp;
-			}
-		}
-	if(k<0)
-		{if(k>-7)
-			{if(k&1)
-				{ol("DCX SP");
-				k++;
-				}
-			while(k)
-				{ol("PUSH B");
-				k=k+2;
-				}
-			return newsp;
-			}
-		}
-	swap();
-	immed();outdec(k);nl();
-	ol("DAD SP");
-	ol("SPHL");
-	swap();
+	if (k) {
+    	ot("addl $");outdec(k);outstr(",%esp");nl();
+    }
 	return newsp;
 }
 /* Double the primary register */
 doublereg()
-{	ol("DAD H");
+{
+    ol("sall $2,%eax");
 }
 /* Add the primary and secondary registers */
 /*	(results in primary) */
 zadd()
-{	ol("DAD D");
+{
+    ol("addl %ecx,%eax");
 }
 /* Subtract the primary register from the secondary */
 /*	(results in primary) */
 zsub()
-{	callrts("ccsub");
+{
+    ol("subl %ecx,%eax");
+    neg();
 }
 /* Multiply the primary and secondary registers */
 /*	(results in primary */
 mult()
-{	callrts("ccmult");
+{
+    ol("imull %ecx,%eax");
 }
 /* Divide the secondary register by the primary */
 /*	(quotient in primary, remainder in secondary) */
 div()
-{	callrts("ccdiv");
+{
+    swap();
+    ol("cltd");
+    ol("idivl %ecx");
 }
 /* Compute remainder (mod) of secondary register divided */
 /*	by the primary */
 /*	(remainder in primary, quotient in secondary) */
 zmod()
-{	div();
-	swap();
-	}
+{
+    div();
+    ol("movl %edx,%eax");
+}
 /* Inclusive 'or' the primary and the secondary registers */
 /*	(results in primary) */
 zor()
-	{callrts("ccor");}
+{
+    ol("orl %ecx,%eax");
+}
 /* Exclusive 'or' the primary and seconday registers */
 /*	(results in primary) */
 zxor()
-	{callrts("ccxor");}
+{
+    ol("xorl %ecx,%eax");
+}
 /* 'And' the primary and secondary registers */
 /*	(results in primary) */
 zand()
-	{callrts("ccand");}
+{
+    ol("andl %ecx,%eax");
+}
 /* Arithmetic shift right the secondary register number of */
 /*	times in primary (results in primary) */
 asr()
-	{callrts("ccasr");}
+{
+    swap();
+    ol("sarl %cl,%eax");
+}
 /* Arithmetic left shift the secondary register number of */
 /*	times in primary (results in primary) */
 asl()
-	{callrts("ccasl");}
+{
+    swap();
+    ol("sall %cl,%eax");
+}
 /* Form two's complement of primary register */
 neg()
-	{callrts("ccneg");}
-/* Form one's complement of primary register */
-com()
-	{callrts("cccom");}
+{
+    ol("negl %eax");
+}
 /* Increment the primary register by one */
 inc()
-	{ol("INX H");}
+{
+    ol("incl %eax");
+}
 /* Decrement the primary register by one */
 dec()
-	{ol("DCX H");}
+{
+    ol("decl %eax");
+}
 
 /* Following are the conditional operators */
 /* They compare the secondary register against the primary */
@@ -2202,34 +2142,72 @@ dec()
 
 /* Test for equal */
 zeq()
-	{callrts("cceq");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("sete %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for not equal */
 zne()
-	{callrts("ccne");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("setne %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for less than (signed) */
 zlt()
-	{callrts("cclt");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("setl %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for less than or equal to (signed) */
 zle()
-	{callrts("ccle");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("setle %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for greater than (signed) */
 zgt()
-	{callrts("ccgt");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("setg %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for greater than or equal to (signed) */
 zge()
-	{callrts("ccge");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("setge %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for less than (unsigned) */
 ult()
-	{callrts("ccult");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("setb %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for less than or equal to (unsigned) */
 ule()
-	{callrts("ccule");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("setbe %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for greater than (unsigned) */
 ugt()
-	{callrts("ccugt");}
+{
+    ol("cmpl %eax,%ecx");
+    ol("seta %al");
+    ol("movzbl %al,%eax");
+}
 /* Test for greater than or equal to (unsigned) */
 uge()
-	{callrts("ccuge");}
-
-/*	<<<<<  End of small-c compiler	>>>>>	*/
+{
+    ol("cmpl %eax,%ecx");
+    ol("setae %al");
+    ol("movzbl %al,%eax");
+}
 
